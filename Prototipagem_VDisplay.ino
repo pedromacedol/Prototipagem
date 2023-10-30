@@ -86,7 +86,5 @@ void loop() {
     lcd.println("g   ");
     // Você pode adicionar aqui o código para ativar um dispositivo ou executar uma ação quando 100g forem atingidos.
   }
-
-
   delay(1000);
 }
