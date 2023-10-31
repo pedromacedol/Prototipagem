@@ -1,24 +1,40 @@
 #include "HX711.h"  // Biblioteca ESP32-HX711
 #include <Wire.h>   // Biblioteca para comunicação I2C
 #include <LiquidCrystal_I2C.h>
+#include <Keypad.h>
 
 HX711 balanca;                       // Instância da balança HX711
 LiquidCrystal_I2C lcd(0x3F, 16, 2);  // Endereço do display I2C
 
-int DOUT_PIN = 18;  // Escolha o pino GPIO adequado para DOUT (por exemplo, GPIO 18)
-int CLK_PIN = 19;   // Escolha o pino GPIO adequado para CLK (por exemplo, GPIO 19)
+const uint8_t ROWS = 4;
+const uint8_t COLS = 4;
+char keys[ROWS][COLS] = {
+  { '1', '2', '3', 'A' },
+  { '4', '5', '6', 'B' },
+  { '7', '8', '9', 'C' },
+  { '*', '0', '#', 'D' }
+};
+uint8_t colPins[COLS] = { 25, 33, 32, 15 };
+uint8_t rowPins[ROWS] = { 14, 12, 26, 27 };
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+int DOUT_PIN = 18;
+int CLK_PIN = 19;
 
 float calibration_factor = 11777896;  // Fator de calibração para teste inicial
+float pesoDaPorcao = 0.100;           // Peso de uma porção em gramas
+int qtdPorcoesDesejadas = 0;          // Quantidade de porções desejadas
+float pesoDesejado = 0.0;             // Peso total desejado
+
+bool pesoAtingido = false;  // Indicador para verificar se o peso desejado foi atingido
 
 void setup() {
-  balanca.begin(DOUT_PIN, CLK_PIN);  // Inicializa o HX711 com os pinos definidos
+  balanca.begin(DOUT_PIN, CLK_PIN);
   lcd.init();
   lcd.backlight();
-  lcd.begin(16, 2);  // Ajuste o tamanho do LCD conforme suas configurações
-
+  lcd.begin(16, 2);
   Serial.begin(9600);
 
-  // Inicializa a balança
   Serial.println();
   Serial.println("HX711 - Calibracao da Balanca");
   Serial.println("Remova o peso da balanca");
@@ -27,8 +43,8 @@ void setup() {
   Serial.println("Pressione z, x, c, v para diminuir o Fator de Calibracao por 10, 100, 1000, 10000 respectivamente");
   Serial.println("Após leitura correta do peso, pressione t para TARA (zerar)");
 
-  balanca.set_scale();  // Configura a escala da balanca
-  zeraBalanca();        // Zera a Balanca
+  balanca.set_scale(calibration_factor);
+  zeraBalanca();
 }
 
 void zeraBalanca() {
@@ -38,22 +54,64 @@ void zeraBalanca() {
 }
 
 void loop() {
-  balanca.set_scale(calibration_factor);
+  float pesoGramas = balanca.get_units() * 26.57;  // Leitura do peso em gramas (média de 10 leituras)
 
-  float pesoGramas = balanca.get_units() * 26.57;  // Peso em gramas
   Serial.print("Peso: ");
   Serial.print(pesoGramas, 3);
   Serial.println(" g");
 
-  // Verifique se o peso atingiu 100g
-  if (pesoGramas >= 0.100) {
-    lcd.setCursor(2, 0);
-    lcd.print("Porcao de 100g atingida!");
+  if (pesoGramas < pesoDaPorcao) {
+    char key = keypad.getKey();
+    if (key != NO_KEY && isDigit(key)) {
+      qtdPorcoesDesejadas = qtdPorcoesDesejadas * 10 + (key - '0');
+      Serial.print("Quantidade de Porções Desejadas: ");
+      Serial.println(qtdPorcoesDesejadas);
+    } else if (key == '#') {
+      pesoDesejado = qtdPorcoesDesejadas * pesoDaPorcao;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Peso Desejado:");
+      lcd.setCursor(0, 1);
+      lcd.print(pesoDesejado, 2);
+      lcd.print(" g");
+      delay(2000);
+      lcd.clear();
+      lcd.setCursor(2, 0);
+      lcd.print("Aguarde...");
+      delay(1000);
+    }
 
-    // Você pode adicionar aqui o código para ativar um dispositivo ou executar uma ação quando 100g forem atingidos.
+    if (pesoDesejado == 0) {
+      lcd.clear();
+      lcd.setCursor(2, 0);
+      lcd.print("SMART FEEDER");
+    } else if (pesoGramas != 0) {
+      if (!pesoAtingido) {
+        if (pesoGramas >= pesoDesejado) {
+          lcd.clear();
+          lcd.setCursor(1, 0);
+          lcd.print("Peso atingido!");
+          pesoAtingido = true;
+        } else {
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Peso Atual:");
+          lcd.setCursor(0, 1);
+          lcd.print(pesoGramas, 3);
+          lcd.print(" g");
+        }
+      } else if (pesoGramas < pesoDaPorcao) {
+        pesoAtingido = false;
+        lcd.clear();
+        lcd.setCursor(2, 0);
+        lcd.print("SMART FEEDER");
+      }
+    }
   }
 
-  delay(500);
+  if (pesoDesejado > 0 && pesoGramas >= pesoDesejado) {
+    dispenseFood();
+  }
 
   if (Serial.available()) {
     char temp = Serial.read();
@@ -77,14 +135,20 @@ void loop() {
       zeraBalanca();
   }
 
-  if (pesoGramas < 0.100) {
-    lcd.setCursor(2, 0);
-    lcd.print("SMART FEEDER");
-    lcd.setCursor(2, 1);
-    lcd.print("Peso: ");
-    lcd.print(pesoGramas, 3);
-    lcd.println("g   ");
-    // Você pode adicionar aqui o código para ativar um dispositivo ou executar uma ação quando 100g forem atingidos.
-  }
   delay(1000);
+}
+
+void dispenseFood() {
+  // Aqui você pode adicionar a lógica para dispensar comida, como ativar um motor ou solenóide.
+  // Após dispensar a comida, você pode redefinir a quantidade de porções desejadas e o peso desejado.
+  qtdPorcoesDesejadas = 0;
+  pesoDesejado = 0;
+  pesoAtingido = false;  // Resetar o indicador de peso atingido
+  lcd.clear();
+  lcd.setCursor(2, 0);
+  lcd.print("Comida dispensada");
+  lcd.setCursor(1, 1);
+  lcd.print("Peso atingido!");
+  delay(3000);
+
 }
