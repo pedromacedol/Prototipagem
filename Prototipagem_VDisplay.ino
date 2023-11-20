@@ -28,6 +28,14 @@ float pesoDesejado = 0.0;             // Peso total desejado
 
 bool pesoAtingido = false;  // Indicador para verificar se o peso desejado foi atingido
 
+bool tecladoAtivado = false;  // Indicador para verificar se o teclado foi ativado
+
+void zeraBalanca() {
+  Serial.println();
+  balanca.tare();
+  Serial.println("Balanca Zerada");
+}
+
 void setup() {
   balanca.begin(DOUT_PIN, CLK_PIN);
   lcd.init();
@@ -38,29 +46,14 @@ void setup() {
   Serial.println();
   Serial.println("HX711 - Calibracao da Balanca");
   Serial.println("Remova o peso da balanca");
-  Serial.println("Depois que as leituras começarem, coloque um peso conhecido sobre a Balanca");
-  Serial.println("Pressione a, s, d, f para aumentar o Fator de Calibracao por 10, 100, 1000, 10000 respectivamente");
-  Serial.println("Pressione z, x, c, v para diminuir o Fator de Calibracao por 10, 100, 1000, 10000 respectivamente");
-  Serial.println("Após leitura correta do peso, pressione t para TARA (zerar)");
+  Serial.println("Digite a quantidade de porções desejadas e pressione # para confirmar");
 
   balanca.set_scale(calibration_factor);
   zeraBalanca();
 }
 
-void zeraBalanca() {
-  Serial.println();
-  balanca.tare();
-  Serial.println("Balanca Zerada");
-}
-
 void loop() {
-  float pesoGramas = balanca.get_units() * 26.57;  // Leitura do peso em gramas (média de 10 leituras)
-
-  Serial.print("Peso: ");
-  Serial.print(pesoGramas, 3);
-  Serial.println(" g");
-
-  if (pesoGramas < pesoDaPorcao) {
+  if (!tecladoAtivado) {
     char key = keypad.getKey();
     if (key != NO_KEY && isDigit(key)) {
       qtdPorcoesDesejadas = qtdPorcoesDesejadas * 10 + (key - '0');
@@ -68,6 +61,7 @@ void loop() {
       Serial.println(qtdPorcoesDesejadas);
     } else if (key == '#') {
       pesoDesejado = qtdPorcoesDesejadas * pesoDaPorcao;
+      tecladoAtivado = true;  // Ativar o teclado apenas uma vez
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.print("Peso Desejado:");
@@ -80,8 +74,34 @@ void loop() {
       lcd.print("Aguarde...");
       delay(1000);
     }
+  } else {
+    float pesoGramas = balanca.get_units() * 26.57;  // Leitura do peso em gramas (média de 10 leituras)
 
-    if (pesoDesejado == 0) {
+    Serial.print("Peso: ");
+    Serial.print(pesoGramas, 3);
+    Serial.println(" g");
+
+    if (pesoGramas < pesoDaPorcao) {
+      char key = keypad.getKey();
+      if (key != NO_KEY && isDigit(key)) {
+        qtdPorcoesDesejadas = qtdPorcoesDesejadas * 10 + (key - '0');
+        Serial.print("Quantidade de Porções Desejadas: ");
+        Serial.println(qtdPorcoesDesejadas);
+      } else if (key == '#') {
+        pesoDesejado = qtdPorcoesDesejadas * pesoDaPorcao;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Peso Desejado:");
+        lcd.setCursor(0, 1);
+        lcd.print(pesoDesejado, 2);
+        lcd.print(" g");
+        delay(2000);
+        lcd.clear();
+        lcd.setCursor(2, 0);
+        lcd.print("Aguarde...");
+        delay(1000);
+      }
+      if (pesoDesejado == 0) {
       lcd.clear();
       lcd.setCursor(2, 0);
       lcd.print("SMART FEEDER");
@@ -100,55 +120,49 @@ void loop() {
           lcd.print(pesoGramas, 3);
           lcd.print(" g");
         }
-      } else if (pesoGramas < pesoDaPorcao) {
-        pesoAtingido = false;
-        lcd.clear();
-        lcd.setCursor(2, 0);
-        lcd.print("SMART FEEDER");
-      }
+      } 
     }
-  }
+      
+    }
 
-  if (pesoDesejado > 0 && pesoGramas >= pesoDesejado) {
-    dispenseFood();
-  }
+    if (pesoDesejado > 0 && pesoGramas >= pesoDesejado) {
+      dispenseFood();
+    }
 
-  if (Serial.available()) {
-    char temp = Serial.read();
-    if (temp == '+' || temp == 'a')
-      calibration_factor += 10;
-    else if (temp == '-' || temp == 'z')
-      calibration_factor -= 10;
-    else if (temp == 's')
-      calibration_factor += 100;
-    else if (temp == 'x')
-      calibration_factor -= 100;
-    else if (temp == 'd')
-      calibration_factor += 1000;
-    else if (temp == 'c')
-      calibration_factor -= 1000;
-    else if (temp == 'f')
-      calibration_factor += 10000;
-    else if (temp == 'v')
-      calibration_factor -= 10000;
-    else if (temp == 't')
-      zeraBalanca();
-  }
+    if (Serial.available()) {
+      char temp = Serial.read();
+      if (temp == '+' || temp == 'a')
+        calibration_factor += 10;
+      else if (temp == '-' || temp == 'z')
+        calibration_factor -= 10;
+      else if (temp == 's')
+        calibration_factor += 100;
+      else if (temp == 'x')
+        calibration_factor -= 100;
+      else if (temp == 'd')
+        calibration_factor += 1000;
+      else if (temp == 'c')
+        calibration_factor -= 1000;
+      else if (temp == 'f')
+        calibration_factor += 10000;
+      else if (temp == 'v')
+        calibration_factor -= 10000;
+      else if (temp == 't')
+        zeraBalanca();
+    }
 
-  delay(1000);
+    delay(1000);  // Atraso opcional, ajuste conforme necessário
+  }
 }
 
 void dispenseFood() {
-  // Aqui você pode adicionar a lógica para dispensar comida, como ativar um motor ou solenóide.
-  // Após dispensar a comida, você pode redefinir a quantidade de porções desejadas e o peso desejado.
   qtdPorcoesDesejadas = 0;
   pesoDesejado = 0;
-  pesoAtingido = false;  // Resetar o indicador de peso atingido
+  pesoAtingido = false;
   lcd.clear();
   lcd.setCursor(2, 0);
   lcd.print("Comida dispensada");
   lcd.setCursor(1, 1);
   lcd.print("Peso atingido!");
   delay(3000);
-
 }
