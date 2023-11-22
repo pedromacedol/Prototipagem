@@ -2,8 +2,12 @@
 #include <Wire.h>   // Biblioteca para comunicação I2C
 #include <LiquidCrystal_I2C.h>
 #include <Keypad.h>
+#include <ESP32Servo.h>
 
-HX711 balanca;                       // Instância da balança HX711
+Servo myServo;
+int servoPin = 23;
+
+HX711 digitaScale;                   // Instância da balança HX711
 LiquidCrystal_I2C lcd(0x3F, 16, 2);  // Endereço do display I2C
 
 const uint8_t ROWS = 4;
@@ -21,148 +25,127 @@ Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 int DOUT_PIN = 18;
 int CLK_PIN = 19;
 
-float calibration_factor = 11777896;  // Fator de calibração para teste inicial
-float pesoDaPorcao = 0.100;           // Peso de uma porção em gramas
-int qtdPorcoesDesejadas = 0;          // Quantidade de porções desejadas
-float pesoDesejado = 0.0;             // Peso total desejado
+float calibrationFactor = 11777896;  // calibration factor of balance
+float portionWeight = 0.100;         // 0.100kg
+int portions = 0;
+float weight = 0.0;
+bool isFull = false;
+bool isKey = false;  //change state of matrix keypad
 
-bool pesoAtingido = false;  // Indicador para verificar se o peso desejado foi atingido
-
-bool tecladoAtivado = false;  // Indicador para verificar se o teclado foi ativado
-
-void zeraBalanca() {
+void resetDigitalScale() {
   Serial.println();
-  balanca.tare();
-  Serial.println("Balanca Zerada");
+  digitaScale.tare();
+  Serial.println("Balança Zerada");
 }
 
+
+
 void setup() {
-  balanca.begin(DOUT_PIN, CLK_PIN);
+  digitaScale.begin(DOUT_PIN, CLK_PIN);
   lcd.init();
   lcd.backlight();
   lcd.begin(16, 2);
   Serial.begin(9600);
 
   Serial.println();
-  Serial.println("HX711 - Calibracao da Balanca");
+  Serial.println("HX711 - Calibracao da digitaScale");
   Serial.println("Remova o peso da balanca");
   Serial.println("Digite a quantidade de porções desejadas e pressione # para confirmar");
 
-  balanca.set_scale(calibration_factor);
-  zeraBalanca();
+  digitaScale.set_scale(calibrationFactor);
+  resetDigitalScale();
+
+  myServo.attach(servoPin);
 }
 
 void loop() {
-  if (!tecladoAtivado) {
+  if (!isKey) {
+    lcd.setCursor(2, 0);
+    lcd.print("SMART FEEDER");
+    lcd.setCursor(0, 1);
+    lcd.print("Quantidade:");
     char key = keypad.getKey();
-    if (key != NO_KEY && isDigit(key)) {
-      qtdPorcoesDesejadas = qtdPorcoesDesejadas * 10 + (key - '0');
-      Serial.print("Quantidade de Porções Desejadas: ");
-      Serial.println(qtdPorcoesDesejadas);
-    } else if (key == '#') {
-      pesoDesejado = qtdPorcoesDesejadas * pesoDaPorcao;
-      tecladoAtivado = true;  // Ativar o teclado apenas uma vez
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Peso Desejado:");
-      lcd.setCursor(0, 1);
-      lcd.print(pesoDesejado, 2);
-      lcd.print(" g");
-      delay(2000);
-      lcd.clear();
-      lcd.setCursor(2, 0);
-      lcd.print("Aguarde...");
-      delay(1000);
-    }
-  } else {
-    float pesoGramas = balanca.get_units() * 26.57;  // Leitura do peso em gramas (média de 10 leituras)
 
+    if (key != NO_KEY) {
+      selectPortions(key);
+    }
+
+  } else {
+    float measuredWeight = digitaScale.get_units() * 26.57;
     Serial.print("Peso: ");
-    Serial.print(pesoGramas, 3);
+    Serial.print(measuredWeight, 3);
     Serial.println(" g");
 
-    if (pesoGramas < pesoDaPorcao) {
-      char key = keypad.getKey();
-      if (key != NO_KEY && isDigit(key)) {
-        qtdPorcoesDesejadas = qtdPorcoesDesejadas * 10 + (key - '0');
-        Serial.print("Quantidade de Porções Desejadas: ");
-        Serial.println(qtdPorcoesDesejadas);
-      } else if (key == '#') {
-        pesoDesejado = qtdPorcoesDesejadas * pesoDaPorcao;
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Peso Desejado:");
-        lcd.setCursor(0, 1);
-        lcd.print(pesoDesejado, 2);
-        lcd.print(" g");
-        delay(2000);
-        lcd.clear();
-        lcd.setCursor(2, 0);
-        lcd.print("Aguarde...");
-        delay(1000);
-      }
-      if (pesoDesejado == 0) {
-      lcd.clear();
-      lcd.setCursor(2, 0);
-      lcd.print("SMART FEEDER");
-    } else if (pesoGramas != 0) {
-      if (!pesoAtingido) {
-        if (pesoGramas >= pesoDesejado) {
-          lcd.clear();
-          lcd.setCursor(1, 0);
-          lcd.print("Peso atingido!");
-          pesoAtingido = true;
-        } else {
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("Peso Atual:");
-          lcd.setCursor(0, 1);
-          lcd.print(pesoGramas, 3);
-          lcd.print(" g");
-        }
-      } 
-    }
-      
-    }
-
-    if (pesoDesejado > 0 && pesoGramas >= pesoDesejado) {
-      dispenseFood();
+    if (measuredWeight >= weight) {
+      fullBowl();
     }
 
     if (Serial.available()) {
       char temp = Serial.read();
-      if (temp == '+' || temp == 'a')
-        calibration_factor += 10;
-      else if (temp == '-' || temp == 'z')
-        calibration_factor -= 10;
-      else if (temp == 's')
-        calibration_factor += 100;
-      else if (temp == 'x')
-        calibration_factor -= 100;
-      else if (temp == 'd')
-        calibration_factor += 1000;
-      else if (temp == 'c')
-        calibration_factor -= 1000;
-      else if (temp == 'f')
-        calibration_factor += 10000;
-      else if (temp == 'v')
-        calibration_factor -= 10000;
-      else if (temp == 't')
-        zeraBalanca();
+      balanceCalibration(temp);
     }
 
-    delay(1000);  // Atraso opcional, ajuste conforme necessário
+    delay(1000);
   }
 }
 
-void dispenseFood() {
-  qtdPorcoesDesejadas = 0;
-  pesoDesejado = 0;
-  pesoAtingido = false;
+void fullBowl() {
+  portions = 0;
+  weight = 0;
+  isFull = false;
+  isKey = false;
   lcd.clear();
-  lcd.setCursor(2, 0);
-  lcd.print("Comida dispensada");
-  lcd.setCursor(1, 1);
-  lcd.print("Peso atingido!");
-  delay(3000);
+  lcd.setCursor(1, 0);
+  lcd.print("Peso atingido,");
+  lcd.setCursor(0, 1);
+  lcd.print("remova a racao");
+  delay(100);
+  lcd.clear();
+  myServo.write(0);
+}
+
+void selectPortions(char key) {
+  if (isDigit(key)) {
+    lcd.setCursor(12, 1);
+    portions = portions * 10 + (key - '0');
+    lcd.print(portions);
+    Serial.print("Quantidade de Porções Desejadas: ");
+    Serial.println(portions);
+  } else if (key == '#') {
+    weight = portions * portionWeight;
+    isKey = true;
+    myServo.write(45);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Peso Desejado:");
+    lcd.setCursor(0, 1);
+    lcd.print(weight, 2);
+    lcd.print(" g");
+    delay(2000);
+    lcd.clear();
+    lcd.setCursor(2, 0);
+    lcd.print("Aguarde...");
+    delay(1000);
+  }
+}
+
+void balanceCalibration(char temp) {
+  if (temp == '+' || temp == 'a')
+    calibrationFactor += 10;
+  else if (temp == '-' || temp == 'z')
+    calibrationFactor -= 10;
+  else if (temp == 's')
+    calibrationFactor += 100;
+  else if (temp == 'x')
+    calibrationFactor -= 100;
+  else if (temp == 'd')
+    calibrationFactor += 1000;
+  else if (temp == 'c')
+    calibrationFactor -= 1000;
+  else if (temp == 'f')
+    calibrationFactor += 10000;
+  else if (temp == 'v')
+    calibrationFactor -= 10000;
+  else if (temp == 't')
+    resetDigitalScale();
 }
