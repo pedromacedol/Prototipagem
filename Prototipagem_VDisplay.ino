@@ -1,14 +1,14 @@
-#include "HX711.h"  // Biblioteca ESP32-HX711
-#include <Wire.h>   // Biblioteca para comunicação I2C
+#include "HX711.h" 
+#include <Wire.h>   
 #include <LiquidCrystal_I2C.h>
 #include <Keypad.h>
 #include <ESP32Servo.h>
 
 Servo myServo;
-int servoPin = 23;
+int servoPin = 23; 
 
-HX711 digitaScale;                   // Instância da balança HX711
-LiquidCrystal_I2C lcd(0x3F, 16, 2);  // Endereço do display I2C
+HX711 digitaScale;                  
+LiquidCrystal_I2C lcd(0x3F, 16, 2); 
 
 const uint8_t ROWS = 4;
 const uint8_t COLS = 4;
@@ -25,12 +25,12 @@ Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 int DOUT_PIN = 18;
 int CLK_PIN = 19;
 
-float calibrationFactor = 11777896;  // calibration factor of balance
-float portionWeight = 0.100;         // 0.100kg
+float calibrationFactor = -11777896;  // Calibration factor of balance
+float portionWeight = 0.100;         // Portion weigth = 0.100kg
 int portions = 0;
 float weight = 0.0;
 bool isFull = false;
-bool isKey = false;  //change state of matrix keypad
+bool isKey = false;  
 
 void resetDigitalScale() {
   Serial.println();
@@ -56,9 +56,11 @@ void setup() {
   resetDigitalScale();
 
   myServo.attach(servoPin);
+  myServo.write(0);
 }
 
 void loop() {
+  float measuredWeight = digitaScale.get_units() * 26.57;
   if (!isKey) {
     lcd.setCursor(2, 0);
     lcd.print("SMART FEEDER");
@@ -71,7 +73,6 @@ void loop() {
     }
 
   } else {
-    float measuredWeight = digitaScale.get_units() * 26.57;
     Serial.print("Peso: ");
     Serial.print(measuredWeight, 3);
     Serial.println(" g");
@@ -112,7 +113,8 @@ void selectPortions(char key) {
     Serial.print("Quantidade de Porções Desejadas: ");
     Serial.println(portions);
   } else if (key == '#') {
-    weight = portions * portionWeight;
+    resetDigitalScale();
+    weight = (portions * portionWeight) ;
     isKey = true;
     myServo.write(45);
     lcd.clear();
